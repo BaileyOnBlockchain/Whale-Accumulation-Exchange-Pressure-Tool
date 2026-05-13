@@ -46,6 +46,7 @@ class Settings(BaseSettings):
     alchemy_api_key: str = ""
     blockchair_api_key: str = ""
     helius_api_key: str = ""
+    coingecko_api_key: str = ""
 
     @property
     def chains(self) -> list[str]:

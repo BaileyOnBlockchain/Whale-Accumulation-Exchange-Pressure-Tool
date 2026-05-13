@@ -28,11 +28,20 @@ _BTC_PRICE_FALLBACK = 97_000.0
 # ── Price oracle ──────────────────────────────────────────────────────────────
 
 class CoinGeckoPriceCollector(BaseHTTPCollector):
-    """Simple free-tier price oracle — no API key needed."""
+    """Price oracle — uses Demo API key when configured, free tier otherwise."""
     source_name = "coingecko_prices"
 
     def __init__(self) -> None:
-        super().__init__(rate_limit_rps=2.0)
+        super().__init__(
+            api_key=settings.coingecko_api_key,
+            rate_limit_rps=30.0 if settings.coingecko_api_key else 2.0,
+        )
+
+    def _default_headers(self) -> dict[str, str]:
+        headers = super()._default_headers()
+        if self._api_key:
+            headers["x-cg-demo-api-key"] = self._api_key
+        return headers
 
     async def is_available(self) -> bool:
         try:
