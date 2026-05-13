@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS entity_labels (
 );
 
 CREATE TABLE IF NOT EXISTS provenance_records (
-    id              INTEGER PRIMARY KEY,
+    id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     address         TEXT NOT NULL,
     chain           TEXT NOT NULL,
     source_name     TEXT NOT NULL,
@@ -105,6 +105,20 @@ class CorpusStore:
 
     def _init_sync(self) -> None:
         con = self._connect()
+        # Migrate: drop provenance_records if it was created with the old
+        # `id INTEGER PRIMARY KEY` (no sequence), which causes NOT NULL failures.
+        try:
+            col_info = con.execute("DESCRIBE provenance_records").fetchall()
+            col_names = [r[0] for r in col_info]
+            if "id" in col_names:
+                id_col = next(r for r in col_info if r[0] == "id")
+                # DuckDB identity columns have 'YES' in the generated column position
+                # Old schema has no default — detect by checking DEFAULT value
+                col_default = id_col[4] if len(id_col) > 4 else None
+                if col_default is None or "nextval" not in str(col_default).lower():
+                    con.execute("DROP TABLE IF EXISTS provenance_records")
+        except Exception:
+            pass  # Table doesn't exist yet — that's fine
         con.execute(_SCHEMA)
         con.execute(_CREATE_INDEXES)
         con.close()
@@ -118,6 +132,7 @@ class CorpusStore:
         now_ms = int(time.time() * 1000)
         con = self._connect()
         try:
+            con.execute("BEGIN")
             existing = con.execute(
                 "SELECT first_seen_ms FROM entity_labels WHERE address=? AND chain=?",
                 [label.address.lower(), label.chain.value],
@@ -176,6 +191,10 @@ class CorpusStore:
                         src.fetched_at_ms,
                     ],
                 )
+            con.execute("COMMIT")
+        except Exception:
+            con.execute("ROLLBACK")
+            raise
         finally:
             con.close()
 

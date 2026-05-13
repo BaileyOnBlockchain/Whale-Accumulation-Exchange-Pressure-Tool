@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import asyncio
 import signal
-import sys
 import time
 
 try:
@@ -49,8 +48,12 @@ class Pipeline:
         log.info("pipeline_starting", chains=settings.chains, assets=settings.assets)
 
         if not await ping():
-            log.error("redis_not_reachable", url=settings.redis_url)
-            sys.exit(1)
+            log.warning(
+                "redis_not_reachable",
+                url=settings.redis_url,
+                note="Signals will not be cached — add a Redis service to enable caching",
+            )
+            return
 
         await self._store.initialize()
         log.info("corpus_store_initialized", db_path=settings.corpus_db_path)
