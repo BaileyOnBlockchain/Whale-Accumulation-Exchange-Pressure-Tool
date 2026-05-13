@@ -39,6 +39,17 @@ log = get_logger(__name__)
 _ETH_PRICE_FALLBACK = 3_500.0
 
 
+def _redis_float(data: dict, key: bytes, default: float = 0.0) -> float:
+    """Safely decode a Redis bytes value to float (decode_responses=False)."""
+    raw = data.get(key)
+    if raw is None:
+        return default
+    try:
+        return float(raw.decode("utf-8") if isinstance(raw, bytes) else raw)
+    except (ValueError, AttributeError):
+        return default
+
+
 class ExchangePressureTracker:
     """
     Tracks exchange reserve balances and net flows for known exchange wallets.
@@ -99,7 +110,7 @@ class ExchangePressureTracker:
             # Load previous reserve from Redis
             rkey = key_exchange_reserve("ethereum", exchange_name.lower())
             prev_data = await self._redis.hgetall(rkey)
-            prev_reserve = float(prev_data.get(b"balance_usd", b"0") or 0)
+            prev_reserve = _redis_float(prev_data, b"balance_usd")
             prev_reserve_usd += prev_reserve
 
             reserve_delta = current_reserve - prev_reserve
@@ -204,15 +215,14 @@ class ExchangePressureTracker:
             rkey = key_exchange_reserve(chain.lower(), exchange_name.lower())
             data = await self._redis.hgetall(rkey)
             if data:
-                balance_usd = float(data.get(b"balance_usd", b"0") or 0)
                 reserves.append(ExchangeReserve(
                     exchange_name=exchange_name,
                     chain=Chain(chain.lower()),
                     asset=asset.upper(),
                     balance_native=0.0,
-                    balance_usd=balance_usd,
+                    balance_usd=_redis_float(data, b"balance_usd"),
                     wallet_count=len(addrs),
-                    updated_ms=int(data.get(b"updated_ms", b"0") or 0),
+                    updated_ms=int(_redis_float(data, b"updated_ms")),
                 ))
 
         return sorted(reserves, key=lambda r: r.balance_usd, reverse=True)

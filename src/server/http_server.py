@@ -13,6 +13,7 @@ Endpoints mirror the MCP tools for direct HTTP access:
 from __future__ import annotations
 
 import time
+from contextlib import asynccontextmanager
 from typing import Any
 
 import uvicorn
@@ -30,17 +31,6 @@ from src.utils.metrics import start_metrics_server
 
 configure_logging()
 log = get_logger(__name__)
-
-app = FastAPI(
-    title="Whale Accumulation & Exchange-Pressure Intelligence",
-    description=(
-        "On-chain whale accumulation and exchange-pressure intelligence. "
-        "All address labels carry transparent provenance — every entity "
-        "classification cites its exact source and methodology."
-    ),
-    version="1.0.0",
-    default_response_class=ORJSONResponse,
-)
 
 _whale_tracker: WhaleTracker | None = None
 _exchange_tracker: ExchangePressureTracker | None = None
@@ -60,14 +50,28 @@ def _et() -> ExchangePressureTracker:
     return _exchange_tracker
 
 
-@app.on_event("startup")
-async def startup() -> None:
+@asynccontextmanager
+async def lifespan(application: FastAPI):
     store = get_store()
     await store.initialize()
     from src.collectors.exchange_wallets import build_seed_labels
     seed = build_seed_labels()
     await store.upsert_labels_bulk(seed)
     log.info("http_server_started", seed_labels=len(seed))
+    yield
+
+
+app = FastAPI(
+    title="Whale Accumulation & Exchange-Pressure Intelligence",
+    description=(
+        "On-chain whale accumulation and exchange-pressure intelligence. "
+        "All address labels carry transparent provenance — every entity "
+        "classification cites its exact source and methodology."
+    ),
+    version="1.0.0",
+    default_response_class=ORJSONResponse,
+    lifespan=lifespan,
+)
 
 
 @app.get("/health")
@@ -173,8 +177,8 @@ async def get_holders(
 
 @app.post("/corpus/refresh")
 async def corpus_refresh(
-    sources: list[str] | None = None,
-    chain: str = "ethereum",
+    sources: list[str] | None = Query(default=None),
+    chain: str = Query(default="ethereum"),
 ) -> dict[str, Any]:
     store = get_store()
     from src.collectors.exchange_wallets import build_seed_labels

@@ -24,13 +24,14 @@ from __future__ import annotations
 import asyncio
 import time
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import BaseModel
 
-from src.config import settings, ACCUMULATION_LABELS
+from src.config import settings
+from src.core.models import Chain
 from src.corpus.store import get_store
 from src.corpus.provenance import build_provenance_dict
 from src.intelligence.whale_tracker import WhaleTracker
@@ -242,15 +243,12 @@ async def get_accumulation_signal(
             )
         elif chain == "bitcoin" and asset == "BTC":
             whale_flow = await wt.scan_btc_whales(lookback_hours)
-            exchange_pressure = wt._empty_summary(  # BTC exchange pressure stub
-                __import__("src.core.models", fromlist=["Chain"]).Chain.bitcoin,
-                "BTC", lookback_hours
-            )
+            exchange_pressure = et._empty_summary(Chain.bitcoin, "BTC", lookback_hours)
         else:
-            return {
-                "error": f"Unsupported chain/asset: {chain}/{asset}. "
-                         "Supported: ethereum/ETH, bitcoin/BTC"
-            }
+            raise ValueError(
+                f"Unsupported chain/asset: {chain}/{asset}. "
+                "Supported: ethereum/ETH, bitcoin/BTC"
+            )
 
         signal = compute_accumulation_score(whale_flow, exchange_pressure)
         await cache_signal(signal)

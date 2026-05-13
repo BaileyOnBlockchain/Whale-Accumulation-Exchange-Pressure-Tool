@@ -36,6 +36,28 @@ _WHALE_THRESHOLD_USD = settings.whale_min_usd
 _TOP_N = settings.whale_top_n
 
 
+def _redis_float(data: dict, key: bytes, default: float = 0.0) -> float:
+    """Safely decode a Redis bytes value to float (decode_responses=False)."""
+    raw = data.get(key)
+    if raw is None:
+        return default
+    try:
+        return float(raw.decode("utf-8") if isinstance(raw, bytes) else raw)
+    except (ValueError, AttributeError):
+        return default
+
+
+def _redis_int(data: dict, key: bytes, default: int = 0) -> int:
+    """Safely decode a Redis bytes value to int."""
+    raw = data.get(key)
+    if raw is None:
+        return default
+    try:
+        return int(raw.decode("utf-8") if isinstance(raw, bytes) else raw)
+    except (ValueError, AttributeError):
+        return default
+
+
 class WhaleTracker:
     """
     Continuously tracks balance changes for labeled + discovered whale addresses.
@@ -156,7 +178,7 @@ class WhaleTracker:
             prev_data = await self._redis.hgetall(rkey)
 
             if prev_data:
-                prev_usd = float(prev_data.get(b"balance_usd", b"0") or 0)
+                prev_usd = _redis_float(prev_data, b"balance_usd")
             else:
                 prev_usd = snap.balance_usd   # first scan — no delta yet
 
@@ -177,7 +199,7 @@ class WhaleTracker:
                     curr_balance_usd=snap.balance_usd,
                     delta_usd=delta_usd,
                     delta_pct=round(delta_pct, 2),
-                    period_start_ms=int(prev_data.get(b"updated_ms", b"0") or 0),
+                    period_start_ms=_redis_int(prev_data, b"updated_ms"),
                     period_end_ms=now_ms,
                     entity_name=entity_name,
                     entity_type=entity_type,

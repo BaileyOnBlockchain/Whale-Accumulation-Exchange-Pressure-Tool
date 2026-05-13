@@ -344,9 +344,10 @@ class CorpusStore:
         try:
             con.execute(
                 """
-                INSERT OR REPLACE INTO balance_history
+                INSERT INTO balance_history
                     (address, chain, asset, balance_native, balance_usd, block_height, snapshot_ms)
                 VALUES (?,?,?,?,?,?,?)
+                ON CONFLICT (address, chain, asset, snapshot_ms) DO NOTHING
                 """,
                 [address, chain, asset, balance_native, balance_usd, block_height, now_ms],
             )
@@ -437,6 +438,8 @@ class CorpusStore:
     def _get_flow_aggregates_sync(
         self, chain: str, asset: str, days: int
     ) -> list[dict[str, Any]]:
+        from datetime import date, timedelta
+        cutoff = (date.today() - timedelta(days=days)).strftime("%Y-%m-%d")
         con = self._connect()
         try:
             rows = con.execute(
@@ -447,13 +450,11 @@ class CorpusStore:
                        SUM(net_flow_usd) AS net_flow_usd,
                        SUM(tx_count) AS tx_count
                 FROM flow_aggregates
-                WHERE chain=? AND asset=?
-                  AND date_bucket >= strftime('%Y-%m-%d',
-                        current_date - INTERVAL ? DAY)
+                WHERE chain=? AND asset=? AND date_bucket >= ?
                 GROUP BY exchange_name, date_bucket
                 ORDER BY date_bucket DESC
                 """,
-                [chain, asset, days],
+                [chain, asset, cutoff],
             ).fetchall()
             cols = ["exchange_name", "date_bucket", "inflow_usd", "outflow_usd",
                     "net_flow_usd", "tx_count"]

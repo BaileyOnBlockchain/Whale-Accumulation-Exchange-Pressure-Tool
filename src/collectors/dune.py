@@ -15,6 +15,7 @@ API key unlocks larger result sets and faster execution.
 """
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import Any
 
@@ -152,7 +153,6 @@ class DuneCollector(BaseHTTPCollector):
     async def _poll_execution(
         self, execution_id: str, max_wait_s: int = 120
     ) -> list[dict[str, Any]]:
-        import asyncio
         deadline = time.time() + max_wait_s
         while time.time() < deadline:
             try:

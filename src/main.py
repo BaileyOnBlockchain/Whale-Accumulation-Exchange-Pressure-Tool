@@ -41,18 +41,48 @@ async def _main() -> None:
 
     transport = os.environ.get("MCP_TRANSPORT", "stdio")
     if transport == "sse":
-        from src.server.mcp_server import mcp
         import uvicorn
+        from starlette.applications import Starlette
+        from starlette.responses import JSONResponse
+        from starlette.routing import Mount, Route
+        from src.server.mcp_server import mcp
+
+        async def _health(request):
+            return JSONResponse({"status": "ok", "service": "whale-accumulation-mcp"})
+
+        combined = Starlette(routes=[
+            Route("/health", _health),
+            Mount("/", app=mcp.sse_app()),
+        ])
+
         port = int(os.environ.get("PORT", settings.http_port))
         config = uvicorn.Config(
-            mcp.sse_app(),
+            combined,
             host="0.0.0.0",
             port=port,
             log_level="info",
             forwarded_allow_ips="*",
             proxy_headers=True,
         )
-        await uvicorn.Server(config).serve()
+        server = uvicorn.Server(config)
+
+        # Run pipeline alongside the MCP server in the same process
+        from src.pipeline import Pipeline
+        pipeline = Pipeline()
+
+        async def _run_pipeline():
+            try:
+                await pipeline.run()
+            except BaseException as exc:
+                log.error("pipeline_crashed", error=str(exc))
+
+        pipeline_task = asyncio.create_task(_run_pipeline())
+        try:
+            await server.serve()
+        finally:
+            pipeline.stop()
+            pipeline_task.cancel()
+            await asyncio.gather(pipeline_task, return_exceptions=True)
     else:
         from src.server.mcp_server import mcp
         mcp.run()
