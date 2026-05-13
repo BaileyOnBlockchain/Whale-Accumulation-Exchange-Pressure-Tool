@@ -24,6 +24,11 @@ def configure_logging() -> None:
         logger_factory=structlog.PrintLoggerFactory(),
     )
 
+    # Suppress noisy HTTP request logs from httpx/httpcore — we log meaningful
+    # events ourselves; the raw per-request INFO lines just clutter Railway logs.
+    for noisy in ("httpx", "httpcore", "hpack"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
+
 
 def get_logger(name: str) -> structlog.BoundLogger:
     return structlog.get_logger(name)

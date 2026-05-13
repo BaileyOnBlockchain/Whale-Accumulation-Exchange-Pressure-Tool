@@ -19,6 +19,8 @@ import asyncio
 import time
 from typing import Any
 
+import httpx
+
 from src.collectors.base import BaseHTTPCollector
 from src.config import settings, SOURCE_DUNE_SPELLBOOK
 from src.core.models import Chain, EntityLabel, EntityType, WalletRole
@@ -103,6 +105,13 @@ class DuneCollector(BaseHTTPCollector):
                 params={"limit": limit},
             )
             return data.get("result", {}).get("rows", [])
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                log.debug("dune_query_not_found", query_id=query_id)
+            else:
+                log.warning("dune_results_failed", query_id=query_id,
+                            status=exc.response.status_code, error=str(exc))
+            return []
         except Exception as exc:
             log.warning("dune_results_failed", query_id=query_id, error=str(exc))
             return []
