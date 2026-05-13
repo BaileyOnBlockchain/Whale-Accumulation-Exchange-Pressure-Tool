@@ -59,16 +59,34 @@ class CoinGeckoPriceCollector(BaseHTTPCollector):
 
 # ── Ethereum on-chain (Alchemy) ───────────────────────────────────────────────
 
+# Ordered by reliability — tried in sequence when the primary fails
+_PUBLIC_ETH_RPCS = [
+    "https://rpc.ankr.com/eth",
+    "https://ethereum.publicnode.com",
+    "https://cloudflare-eth.com",
+    "https://eth.llamarpc.com",
+    "https://1rpc.io/eth",
+]
+
+
 class AlchemyCollector(BaseHTTPCollector):
     source_name = "alchemy_ethereum"
 
     def __init__(self, api_key: str = "") -> None:
         super().__init__(api_key=api_key or settings.alchemy_api_key, rate_limit_rps=25.0)
-        self._rpc_url = (
-            f"https://eth-mainnet.g.alchemy.com/v2/{self._api_key}"
-            if self._api_key
-            else "https://eth.llamarpc.com"  # free public RPC fallback
-        )
+        if self._api_key:
+            self._rpc_urls = [f"https://eth-mainnet.g.alchemy.com/v2/{self._api_key}"]
+        else:
+            self._rpc_urls = list(_PUBLIC_ETH_RPCS)
+        self._rpc_url_idx = 0
+
+    @property
+    def _rpc_url(self) -> str:
+        return self._rpc_urls[self._rpc_url_idx % len(self._rpc_urls)]
+
+    def _next_rpc(self) -> None:
+        self._rpc_url_idx = (self._rpc_url_idx + 1) % len(self._rpc_urls)
+        log.info("rpc_fallback", next_url=self._rpc_url)
 
     async def is_available(self) -> bool:
         try:
@@ -78,15 +96,23 @@ class AlchemyCollector(BaseHTTPCollector):
             return False
 
     async def _rpc_call(self, method: str, params: list[Any]) -> Any:
-        resp = await self.post(self._rpc_url, json={
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": method,
-            "params": params,
-        })
-        if "error" in resp:
-            raise ValueError(f"RPC error: {resp['error']}")
-        return resp.get("result")
+        last_exc: Exception | None = None
+        for _ in range(len(self._rpc_urls)):
+            try:
+                resp = await self.post(self._rpc_url, json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": method,
+                    "params": params,
+                })
+                if "error" in resp:
+                    raise ValueError(f"RPC error: {resp['error']}")
+                return resp.get("result")
+            except Exception as exc:
+                last_exc = exc
+                log.warning("rpc_endpoint_failed", url=self._rpc_url, error=str(exc))
+                self._next_rpc()
+        raise RuntimeError(f"All RPC endpoints failed. Last error: {last_exc}")
 
     async def get_eth_balance_wei(self, address: str) -> int:
         result = await self._rpc_call("eth_getBalance", [address, "latest"])

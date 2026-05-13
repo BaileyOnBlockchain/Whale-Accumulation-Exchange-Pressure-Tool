@@ -80,9 +80,39 @@ class BaseHTTPCollector(ABC):
     async def post(self, url: str, json: dict[str, Any] | None = None,
                    headers: dict[str, str] | None = None) -> dict[str, Any]:
         client = await self._get_client()
-        resp = await client.post(url, json=json, headers=headers)
-        resp.raise_for_status()
-        return resp.json()
+        backoff_idx = 0
+
+        while True:
+            async with self._semaphore:
+                try:
+                    resp = await client.post(url, json=json, headers=headers)
+                    if resp.status_code == 429:
+                        wait = int(resp.headers.get("Retry-After", _BACKOFF[backoff_idx]))
+                        log.warning("rate_limited_post", source=self.source_name, wait_s=wait)
+                        await asyncio.sleep(wait)
+                        backoff_idx = min(backoff_idx + 1, len(_BACKOFF) - 1)
+                        continue
+                    resp.raise_for_status()
+                    return resp.json()
+                except httpx.HTTPStatusError as exc:
+                    if exc.response.status_code >= 500:
+                        if backoff_idx >= 3:
+                            raise
+                        wait = _BACKOFF[backoff_idx]
+                        backoff_idx += 1
+                        log.warning("server_error_post", source=self.source_name,
+                                    status=exc.response.status_code, retry_in=wait)
+                        await asyncio.sleep(wait)
+                        continue
+                    raise
+                except (httpx.ConnectError, httpx.TimeoutException) as exc:
+                    if backoff_idx >= 3:
+                        raise
+                    wait = _BACKOFF[backoff_idx]
+                    backoff_idx += 1
+                    log.warning("connection_error_post", source=self.source_name,
+                                error=str(exc), retry_in=wait)
+                    await asyncio.sleep(wait)
 
     @abstractmethod
     async def is_available(self) -> bool:
