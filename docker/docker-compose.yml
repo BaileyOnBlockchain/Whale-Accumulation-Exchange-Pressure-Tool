@@ -1,0 +1,78 @@
+version: "3.9"
+
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6380:6379"
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  pipeline:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      CORPUS_DB_PATH: /app/data/corpus.duckdb
+      LOG_LEVEL: INFO
+      METRICS_PORT: 9091
+      ARKHAM_API_KEY: ${ARKHAM_API_KEY:-}
+      DUNE_API_KEY: ${DUNE_API_KEY:-}
+      ETHERSCAN_API_KEY: ${ETHERSCAN_API_KEY:-}
+      ALCHEMY_API_KEY: ${ALCHEMY_API_KEY:-}
+      BLOCKCHAIR_API_KEY: ${BLOCKCHAIR_API_KEY:-}
+    ports:
+      - "9091:9091"      # Prometheus metrics
+    volumes:
+      - corpus_data:/app/data
+    command: ["python", "-m", "src.pipeline"]
+
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      CORPUS_DB_PATH: /app/data/corpus.duckdb
+      HTTP_HOST: 0.0.0.0
+      HTTP_PORT: 8001
+      LOG_LEVEL: INFO
+      ARKHAM_API_KEY: ${ARKHAM_API_KEY:-}
+      DUNE_API_KEY: ${DUNE_API_KEY:-}
+      ETHERSCAN_API_KEY: ${ETHERSCAN_API_KEY:-}
+      ALCHEMY_API_KEY: ${ALCHEMY_API_KEY:-}
+    ports:
+      - "8001:8001"
+    volumes:
+      - corpus_data:/app/data
+    command: ["python", "-m", "src.server.http_server"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # MCP server runs as stdio subprocess — NOT a persistent service.
+  # Configure in your MCP client (Claude Desktop / Claude Code):
+  #   command: docker exec -i <pipeline_container_id> python -m src.server.mcp_server
+  # Or locally: python -m src.server.mcp_server
+
+volumes:
+  redis_data:
+  corpus_data:
