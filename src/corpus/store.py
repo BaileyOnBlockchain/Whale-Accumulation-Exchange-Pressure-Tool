@@ -44,7 +44,6 @@ CREATE TABLE IF NOT EXISTS entity_labels (
 );
 
 CREATE TABLE IF NOT EXISTS provenance_records (
-    id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     address         TEXT NOT NULL,
     chain           TEXT NOT NULL,
     source_name     TEXT NOT NULL,
@@ -52,7 +51,8 @@ CREATE TABLE IF NOT EXISTS provenance_records (
     source_url      TEXT NOT NULL DEFAULT '',
     methodology     TEXT NOT NULL DEFAULT '',
     confidence      FLOAT NOT NULL DEFAULT 0.0,
-    fetched_at_ms   BIGINT NOT NULL DEFAULT 0
+    fetched_at_ms   BIGINT NOT NULL DEFAULT 0,
+    PRIMARY KEY (address, chain, source_name)
 );
 
 CREATE TABLE IF NOT EXISTS balance_history (
@@ -105,20 +105,6 @@ class CorpusStore:
 
     def _init_sync(self) -> None:
         con = self._connect()
-        # Migrate: drop provenance_records if it was created with the old
-        # `id INTEGER PRIMARY KEY` (no sequence), which causes NOT NULL failures.
-        try:
-            col_info = con.execute("DESCRIBE provenance_records").fetchall()
-            col_names = [r[0] for r in col_info]
-            if "id" in col_names:
-                id_col = next(r for r in col_info if r[0] == "id")
-                # DuckDB identity columns have 'YES' in the generated column position
-                # Old schema has no default — detect by checking DEFAULT value
-                col_default = id_col[4] if len(id_col) > 4 else None
-                if col_default is None or "nextval" not in str(col_default).lower():
-                    con.execute("DROP TABLE IF EXISTS provenance_records")
-        except Exception:
-            pass  # Table doesn't exist yet — that's fine
         con.execute(_SCHEMA)
         con.execute(_CREATE_INDEXES)
         con.close()
@@ -179,6 +165,12 @@ class CorpusStore:
                         (address, chain, source_name, source_label, source_url,
                          methodology, confidence, fetched_at_ms)
                     VALUES (?,?,?,?,?,?,?,?)
+                    ON CONFLICT (address, chain, source_name) DO UPDATE SET
+                        source_label  = excluded.source_label,
+                        source_url    = excluded.source_url,
+                        methodology   = excluded.methodology,
+                        confidence    = excluded.confidence,
+                        fetched_at_ms = excluded.fetched_at_ms
                     """,
                     [
                         label.address.lower(),
@@ -193,7 +185,10 @@ class CorpusStore:
                 )
             con.execute("COMMIT")
         except Exception:
-            con.execute("ROLLBACK")
+            try:
+                con.execute("ROLLBACK")
+            except Exception:
+                pass
             raise
         finally:
             con.close()
