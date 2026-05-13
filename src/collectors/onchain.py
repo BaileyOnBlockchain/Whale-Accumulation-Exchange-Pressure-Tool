@@ -75,7 +75,12 @@ class AlchemyCollector(BaseHTTPCollector):
     def __init__(self, api_key: str = "") -> None:
         super().__init__(api_key=api_key or settings.alchemy_api_key, rate_limit_rps=25.0)
         if self._api_key:
-            self._rpc_urls = [f"https://eth-mainnet.g.alchemy.com/v2/{self._api_key}"]
+            # Accept either the raw key or the full endpoint URL
+            if self._api_key.startswith("https://"):
+                alchemy_url = self._api_key.rstrip("/")
+            else:
+                alchemy_url = f"https://eth-mainnet.g.alchemy.com/v2/{self._api_key}"
+            self._rpc_urls = [alchemy_url]
         else:
             self._rpc_urls = list(_PUBLIC_ETH_RPCS)
         self._rpc_url_idx = 0
