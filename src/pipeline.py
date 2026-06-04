@@ -90,17 +90,13 @@ class Pipeline:
             log.info("corpus_seeded", count=n)
             corpus_refresh_total.labels(source="exchange_wallet_seed").inc()
 
-            # Optional: Arkham refresh
-            if settings.arkham_api_key:
-                from src.collectors.arkham import ArkhamCollector
-                from src.collectors.exchange_wallets import get_known_exchange_addresses
-                arkham = ArkhamCollector()
-                if await arkham.is_available():
-                    addrs = list(get_known_exchange_addresses("ethereum"))[:100]
-                    ark_labels = await arkham.batch_lookup(addrs, "ethereum")
-                    n_ark = await self._store.upsert_labels_bulk(ark_labels)
-                    log.info("corpus_arkham_refreshed", count=n_ark)
-                    corpus_refresh_total.labels(source="arkham_intelligence").inc()
+            # Community labels (free, no API key — replaces Arkham)
+            from src.collectors.community_labels import GitHubLabelsCollector
+            community = GitHubLabelsCollector()
+            community_labels = await community.get_eth_labels()
+            n_community = await self._store.upsert_labels_bulk(community_labels)
+            log.info("corpus_community_refreshed", count=n_community)
+            corpus_refresh_total.labels(source="community_curated").inc()
 
             # Optional: Dune refresh
             if settings.dune_api_key:

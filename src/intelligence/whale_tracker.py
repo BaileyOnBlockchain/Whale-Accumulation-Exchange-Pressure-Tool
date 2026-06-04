@@ -299,7 +299,7 @@ class WhaleTracker:
                 "methodology": (
                     "Balance snapshots fetched from on-chain RPC. "
                     "Deltas computed against previous snapshot stored in Redis. "
-                    "Addresses labeled from our corpus (Arkham + Dune + exchange seed). "
+                    "Addresses labeled from our corpus (community labels + Dune + exchange seed). "
                     "Only deltas > $1,000 USD included to filter dust."
                 ),
             },

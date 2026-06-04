@@ -148,11 +148,11 @@ def compute_accumulation_score(
             "(3) accumulating-vs-distributing wallet ratio (→ 15 pts), "
             "(4) whale accumulation vs exchange inflow ratio (→ 10 pts). "
             "All input data is derived from labeled addresses in our own corpus — "
-            "Arkham Intelligence, Dune Spellbook, exchange seed wallets, on-chain heuristics."
+            "community-curated labels, Dune Spellbook, exchange seed wallets, on-chain heuristics."
         ),
         "corpus_sources": [
             "exchange_wallet_seed",
-            "arkham_intelligence",
+            "community_curated",
             "dune_spellbook",
             "etherscan_labels",
             "heuristic:deposit_clustering",

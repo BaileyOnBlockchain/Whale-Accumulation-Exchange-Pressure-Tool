@@ -13,7 +13,7 @@ Execute:
   refresh_corpus             → trigger labeled corpus update from all sources
 
 All responses carry provenance, confidence, freshness, and evidence.
-Every label cites its exact source (Arkham, Dune Spellbook, exchange seed,
+Every label cites its exact source (community labels, Dune Spellbook, exchange seed,
 on-chain heuristic) so the caller can verify independently.
 
 Transport: stdio (default) or SSE (set MCP_TRANSPORT=sse)
@@ -147,7 +147,7 @@ mcp = FastMCP(
         "Tracks large wallet (whale) balance changes, exchange inflow/outflow dynamics, "
         "and computes a composite accumulation signal (-100 to +100). "
         "All address labels carry transparent provenance: every entity classification "
-        "cites its exact source (Arkham Intelligence, Dune Spellbook, exchange seed corpus, "
+        "cites its exact source (community labels, Dune Spellbook, exchange seed corpus, "
         "or on-chain heuristics). This is NOT a Glassnode clone — it is a purpose-built "
         "labeled corpus with auditable attribution. "
         "Positive scores indicate whale accumulation and exchange outflows (bullish). "
@@ -391,7 +391,7 @@ async def get_exchange_pressure(
     Exchange wallets are sourced from our corpus:
       - Exchange seed list (Etherscan labels, PoR disclosures)
       - Dune Spellbook cex.addresses (community-verified)
-      - Arkham Intelligence entity labels
+      - Community-curated labels (brianleect/etherscan-labels, ~30k addresses)
       - Heuristic deposit clustering
 
     Parameters
@@ -506,7 +506,7 @@ async def get_entity_label(
                 "note": (
                     "Address not in corpus. To add it: "
                     "(1) run refresh_corpus to pull latest labels, "
-                    "(2) if it's a known entity, submit to Dune Spellbook or Arkham."
+                    "(2) if it's a known entity, submit to Dune Spellbook or brianleect/etherscan-labels."
                 ),
                 "query_latency_ms": round(latency * 1000, 1),
             },
@@ -666,13 +666,13 @@ async def scan_top_holders(
         "provenance": {
             "methodology": (
                 "Top holders sourced from our labeled corpus (exchange seeds, "
-                "Dune Spellbook, Arkham, on-chain heuristics). "
+                "Dune Spellbook, community labels, on-chain heuristics). "
                 "Balances from last pipeline scan. "
                 "Exchange-held tokens do NOT represent true holder demand — "
                 "they represent custodial balances for exchange customers."
             ),
             "corpus_sources": [
-                "exchange_wallet_seed", "arkham_intelligence",
+                "exchange_wallet_seed", "community_labels",
                 "dune_spellbook", "heuristic:whale_behavior",
             ],
             "query_latency_ms": round(latency * 1000, 1),
@@ -704,7 +704,7 @@ async def refresh_corpus(
 
     Pulls fresh labels from all configured sources (or a specific subset):
       - exchange_wallet_seed : reload static seed list (always available)
-      - arkham_intelligence  : fetch entity labels via Arkham public API (needs ARKHAM_API_KEY)
+      - community_labels     : fetch ~30k labels from brianleect/etherscan-labels (no API key)
       - dune_spellbook       : pull from Dune Spellbook labels.addresses (needs DUNE_API_KEY)
       - etherscan_labels     : fetch Etherscan name tags (free tier available)
       - heuristics           : re-run on-chain clustering on recently discovered addresses
@@ -724,7 +724,7 @@ async def refresh_corpus(
 
     all_sources = [
         "exchange_wallet_seed",
-        "arkham_intelligence",
+        "community_labels",
         "dune_spellbook",
         "etherscan_labels",
     ]
@@ -747,21 +747,18 @@ async def refresh_corpus(
         refreshed.append("exchange_wallet_seed")
         log.info("corpus_seed_loaded", count=n)
 
-    # ── Arkham ────────────────────────────────────────────────────────────────
-    if "arkham_intelligence" in requested and settings.arkham_api_key:
+    # ── Community labels (free, no API key) ──────────────────────────────────
+    if "community_labels" in requested and chain == "ethereum":
         try:
-            from src.collectors.arkham import ArkhamCollector
-            from src.collectors.exchange_wallets import get_known_exchange_addresses
-            arkham = ArkhamCollector()
-            if await arkham.is_available():
-                known_addrs = list(get_known_exchange_addresses(chain))[:50]
-                ark_labels = await arkham.batch_lookup(known_addrs, chain)
-                n = await store.upsert_labels_bulk(ark_labels)
-                labels_added += n
-                refreshed.append("arkham_intelligence")
-                log.info("corpus_arkham_loaded", count=n)
+            from src.collectors.community_labels import GitHubLabelsCollector
+            community = GitHubLabelsCollector()
+            cl = await community.get_eth_labels()
+            n = await store.upsert_labels_bulk(cl)
+            labels_added += n
+            refreshed.append("community_labels")
+            log.info("corpus_community_loaded", count=n)
         except Exception as exc:
-            log.warning("corpus_arkham_failed", error=str(exc))
+            log.warning("corpus_community_failed", error=str(exc))
 
     # ── Dune Spellbook ────────────────────────────────────────────────────────
     if "dune_spellbook" in requested and settings.dune_api_key:
@@ -801,13 +798,13 @@ async def refresh_corpus(
         "provenance": {
             "methodology": (
                 "Corpus refresh pulls labeled addresses from public sources: "
-                "Arkham Intelligence entity API, Dune Spellbook labels.addresses, "
-                "and our curated exchange wallet seed list. "
+                "community-curated brianleect/etherscan-labels (~30k addresses, no API key), "
+                "Dune Spellbook labels.addresses, and our curated exchange wallet seed list. "
                 "Each label stores its provenance so it can be independently verified."
             ),
             "sources_attempted": requested,
             "api_keys_configured": {
-                "arkham": bool(settings.arkham_api_key),
+                "community_labels": True,
                 "dune":   bool(settings.dune_api_key),
                 "etherscan": bool(settings.etherscan_api_key),
                 "alchemy": bool(settings.alchemy_api_key),
