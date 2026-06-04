@@ -112,6 +112,43 @@ class Pipeline:
                     log.info("corpus_dune_refreshed", count=n_dune)
                     corpus_refresh_total.labels(source="dune_spellbook").inc()
 
+            # Top-holder discovery: seed whale addresses from Etherscan richlist
+            if settings.etherscan_api_key:
+                from src.collectors.etherscan import EtherscanCollector
+                from src.collectors.exchange_wallets import get_known_exchange_addresses
+                from src.core.models import Chain, EntityLabel, EntityType, WalletRole
+                from src.corpus.provenance import from_etherscan_labels
+                import time as _time
+
+                etherscan = EtherscanCollector()
+                exchange_addr_set = get_known_exchange_addresses("ethereum")
+                raw_holders = await etherscan.get_top_eth_holders(limit=settings.whale_top_n)
+                now_ms = int(_time.time() * 1000)
+                whale_labels = []
+                for h in raw_holders:
+                    addr = (h.get("account") or "").lower()
+                    if not addr or addr in exchange_addr_set:
+                        continue
+                    src_prov = from_etherscan_labels(
+                        label=f"Top ETH Holder #{h.get('rank', '?')}",
+                        address=addr,
+                        tag_category="top_holder",
+                    )
+                    whale_labels.append(EntityLabel(
+                        address=addr,
+                        chain=Chain.ethereum,
+                        entity_name=f"Top Holder #{h.get('rank', '?')}",
+                        entity_type=EntityType.whale,
+                        wallet_role=WalletRole.accumulation,
+                        sources=[src_prov],
+                        confidence=src_prov.confidence,
+                        first_seen_ms=now_ms,
+                        last_updated_ms=now_ms,
+                    ))
+                n_whales = await self._store.upsert_labels_bulk(whale_labels)
+                log.info("corpus_top_holders_seeded", count=n_whales)
+                corpus_refresh_total.labels(source="etherscan_top_holders").inc()
+
             # Update corpus metrics
             stats = await self._store.corpus_stats()
             for entity_type, count in stats.get("by_entity_type", {}).items():
